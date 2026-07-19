@@ -65,6 +65,12 @@ def get_embedding_dim() -> int:
 
 # ── Batch embedding with retry ─────────────────────────────────────────────────
 
+# Semantic search is great at not missing relevant docs (high recall) — it casts a wide
+# net and pulls the top-k candidates. But within that top-k, the ordering is often wrong:
+# the truly best answer might be ranked #7 while a keyword-similar-but-off-topic chunk 
+# sits at #1. Cosine similarity ranks by "vibes similarity," not "does this actually answer
+# the question."
+
 def _embed_batch(batch: list[str]) -> list[list[float]]:
     if _model_type == "gemini":
         # Exponential backoff: 1 s → 2 s → 4 s → 8 s (4 attempts total)

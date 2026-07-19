@@ -58,6 +58,8 @@ def generate_node(state: AgentState):
 
     with logfire.span("✍️ LLM Synthesis"):
         try:
+            # why here we are using client and using .completions 
+            # but in planner we are directly using llm 
             response = portkey_client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1

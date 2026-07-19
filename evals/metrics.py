@@ -8,11 +8,27 @@ Contexts are truncated to 300 chars (2 chunks max) so no single request exceeds 
 
 
 import os
+import sys
+import types
 import asyncio
 import logfire
 import pandas as pd
 from openai import AsyncOpenAI
 
+# ragas==0.4.3's ragas/llms/base.py imports ChatVertexAI from
+# langchain_community.chat_models.vertexai, a path langchain_community removed
+# in 0.4.x (VertexAI support moved to the standalone langchain_google_vertexai
+# package). No ragas release fixes this yet (upstream: ragas issue #2745), so
+# we shim the old module path before ragas is imported anywhere.
+if "langchain_community.chat_models.vertexai" not in sys.modules:
+    try:
+        import langchain_community.chat_models.vertexai  # noqa: F401
+    except ModuleNotFoundError:
+        from langchain_google_vertexai import ChatVertexAI
+
+        _vertexai_shim = types.ModuleType("langchain_community.chat_models.vertexai")
+        _vertexai_shim.ChatVertexAI = ChatVertexAI
+        sys.modules["langchain_community.chat_models.vertexai"] = _vertexai_shim
 
 from ragas.llms import llm_factory
 from ragas.embeddings import HuggingFaceEmbeddings
