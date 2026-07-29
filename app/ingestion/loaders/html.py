@@ -1,5 +1,7 @@
-from bs4 import BeautifulSoup 
+# --- Imports ---
 import logfire
+from bs4 import BeautifulSoup
+
 
 def parse_html(file_path: str):
     """

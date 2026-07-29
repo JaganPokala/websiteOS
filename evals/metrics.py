@@ -31,8 +31,9 @@ if "langchain_community.chat_models.vertexai" not in sys.modules:
         sys.modules["langchain_community.chat_models.vertexai"] = _vertexai_shim
 
 from ragas.llms import llm_factory
-from ragas.embeddings import HuggingFaceEmbeddings
+from ragas.embeddings import OpenAIEmbeddings
 from ragas import SingleTurnSample
+from app.config import settings
 from ragas.metrics.collections import (
     Faithfulness,
     AnswerRelevancy,
@@ -55,10 +56,15 @@ def _build_judge():
     api_key = os.getenv("JUDGE_GROQ") or os.getenv("GROQ_API_KEY")
     client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
     llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
-    embeddings = HuggingFaceEmbeddings(
-        model="sentence-transformers/all-MiniLM-L6-v2",
-        use_api=False,
-    )
+
+    # Same embedding model the live RAG pipeline uses to embed queries
+    # (app/services/retrieval/embedding.py) — not an unrelated local model.
+    # Scores from AnswerRelevancy/AnswerCorrectness now measure similarity in
+    # the SAME vector space retrieval actually runs in, not a different one.
+    # A separate client: the judge LLM above talks to Groq, but Groq doesn't
+    # serve this embedding model — embeddings still go to OpenAI directly.
+    embedding_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    embeddings = OpenAIEmbeddings(client=embedding_client, model=settings.EMBEDDING_MODEL)
     return llm, embeddings
 
 async def _cooldown(seconds: int, label: str, status_cb=None):

@@ -1,11 +1,19 @@
-from app.agents.state import AgentState
-from app.gateway import get_langchain_llm
+# --- Imports: third-party ---
 import logfire
 
-# Portkey-backed LLM: fallback + cache + retry — same .invoke() interface as ChatGroq
-llm = get_langchain_llm(feature="planner")
+# --- Imports: local application ---
+from app.agents.state import AgentState
+from app.config import settings
+from app.gateway import get_langchain_llm
 
-def planner_node(state: AgentState):
+# Portkey-backed LLM (gpt-4.1-nano): OpenAI primary + Groq fallback + cache + retry, via the gateway.
+llm = get_langchain_llm(
+    model=f"@{settings.OPENAI_SLUG}/{settings.PLANNER_MODEL}",
+    feature="planner",
+)
+
+
+async def planner_node(state: AgentState):
     """
     The Planner determines if a search is needed based on the ENTIRE conversation.
     """
@@ -35,7 +43,7 @@ def planner_node(state: AgentState):
     """
     
     with logfire.span("🧠 Planner Decision"):
-        decision = llm.invoke(prompt).content.strip()
+        decision = (await llm.ainvoke(prompt)).content.strip()
         logfire.info(f"Intent identified: {decision}")
     
     if decision == "CONVERSATIONAL":

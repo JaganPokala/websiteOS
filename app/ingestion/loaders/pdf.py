@@ -1,3 +1,4 @@
+# --- Imports ---
 import logfire
 from pypdf import PdfReader
 

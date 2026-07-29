@@ -1,5 +1,9 @@
+# --- Imports: standard library ---
 from typing import List
+
+# --- Imports: third-party ---
 import logfire
+
 
 def chunk_text(text: str, chunk_size: int = 1500) -> List[str]:
     """

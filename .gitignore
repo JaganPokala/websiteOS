@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 env/
+npm/
 venv/
 .venv/
 genv/
@@ -31,8 +32,9 @@ wheels/
 index.faiss
 metadata.pkl
 
-# Data
-
+# Data — raw ingestion corpus, not needed at runtime; keep local-only
+DATA/
+processed_data/
 
 # IDEs
 .vscode/

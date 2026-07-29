@@ -1,10 +1,11 @@
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
-# for production grade we have langmem , neo4j , mem0 
-from app.agents.state import AgentState
+# --- Imports: third-party ---
+from langgraph.graph import END, StateGraph
+
+# --- Imports: local application ---
 from app.agents.nodes.planner import planner_node
-from app.agents.nodes.retriever import retrieve_node
 from app.agents.nodes.responder import generate_node
+from app.agents.nodes.retriever import retrieve_node
+from app.agents.state import AgentState
 
 
 # 1. Initialize the State Graph
@@ -44,11 +45,16 @@ workflow.add_edge("responder", END)
 
 
 # --- MEMORY UPGRADE ---
-# MemorySaver allows the agent to remember conversations based on 'thread_id'
-checkpointer = MemorySaver()
+# The checkpointer (AsyncPostgresSaver) is injected at startup by main.py's
+# lifespan. Conversation snapshots live in Postgres — outside this process —
+# so they survive restarts and can be shared by multiple worker processes.
+rag_agent = None
 
 
-# 4. Compile the Graph with Memory
-rag_agent = workflow.compile(checkpointer=checkpointer)
+def compile_graph(checkpointer):
+    """Compile the graph with a checkpointer. Called once at app startup."""
+    global rag_agent
+    rag_agent = workflow.compile(checkpointer=checkpointer)
+    return rag_agent
 
 

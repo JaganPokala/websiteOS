@@ -1,10 +1,14 @@
+# --- Imports: standard library ---
+import logging
+
+# --- Imports: third-party ---
 import logfire
-from langchain_groq import ChatGroq
-from nemoguardrails import RailsConfig, LLMRails
+from nemoguardrails import LLMRails, RailsConfig
 
+# --- Imports: local application ---
 from app.config import settings
-from app.guardrails.colang_rules import COLANG_CONTENT, YAML_CONTENT, RAIL_INDICATORS
-
+from app.gateway import get_langchain_llm
+from app.guardrails.colang_rules import COLANG_CONTENT, RAIL_INDICATORS, YAML_CONTENT
 
 _rails: LLMRails | None = None
 
@@ -12,15 +16,13 @@ _rails: LLMRails | None = None
 def initialize_rails() -> None:
     """
     Build the NeMo LLMRails singleton at app startup.
-    Uses llama-3.1-8b-instant for fast intent classification at the gate —
-    the heavier llama-3.3-70b-versatile is reserved for the RAG pipeline.
+    Uses gpt-4.1-nano via Portkey for fast intent classification at the gate.
     """
     global _rails
 
-    guard_llm = ChatGroq(
-        api_key=settings.GROQ_API_KEY,
-        model="llama-3.1-8b-instant",
-        temperature=0
+    guard_llm = get_langchain_llm(
+        model=f"@{settings.OPENAI_SLUG}/{settings.GUARDRAILS_MODEL}",
+        feature="guardrails",
     )
 
     config = RailsConfig.from_content(
@@ -29,12 +31,15 @@ def initialize_rails() -> None:
     )
 
     _rails = LLMRails(config, llm=guard_llm)
-    logfire.info("🛡️ NeMo Guardrails initialised (llama-3.1-8b-instant).")
-    
-    
+    logfire.info("🛡️ NeMo Guardrails initialised (gpt-4.1-nano via Portkey).")
+
+    # NeMo logs every internal colang event at INFO — extremely noisy.
+    # Quiet it (and httpx's per-request lines) down to warnings only.
+    logging.getLogger("nemoguardrails").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def guard(message: str) -> tuple[bool, str | None]:
+async def guard(message: str) -> tuple[bool, str | None]:
     """
     Run a user message through the NeMo rails gate.
 
@@ -48,7 +53,7 @@ def guard(message: str) -> tuple[bool, str | None]:
         return False, None
 
     with logfire.span("🛡️ Guardrails Check"):
-        result = _rails.generate(messages=[{"role": "user", "content": message}])
+        result = await _rails.generate_async(messages=[{"role": "user", "content": message}])
 
         # NeMo returns {'role': 'assistant', 'content': '...'} — extract text
         content = result.get("content", "") if isinstance(result, dict) else str(result)

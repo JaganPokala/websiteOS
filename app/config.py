@@ -1,10 +1,16 @@
+# --- Imports ---
 import os
+
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 class Settings:
+    # --- AUTH ---
+    # Signs JWT access tokens. Leaking this lets anyone forge a login — keep it in .env only.
+    JWT_SECRET = os.getenv("JWT_SECRET")
+    
     # --- GEMINI EMBEDDINGS ---
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     # Embedding backend: "auto" (probe Gemini, fall back to local),
@@ -17,17 +23,47 @@ class Settings:
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
     QDRANT_COLLECTION = "enterprise_rag"
 
-    # --- REASONING ENGINE (GROQ) ---
+    # --- CONVERSATION MEMORY (POSTGRES CHECKPOINTER) ---
+    # Connection string, e.g. postgresql://user:pass@host/dbname
+    # Neon: dashboard → Connect → copy the string WITHOUT "-pooler" in the host
+    POSTGRES_URI = os.getenv("POSTGRES_URI")
+
+    # --- RATE LIMITING (REDIS) ---
+    REDIS_URL = os.getenv("REDIS_URL")
+
+    # --- CORS ---
+    # Comma-separated list of origins allowed to call this API. Defaults to the
+    # local Vite dev server so nothing breaks locally; set this env var on the
+    # host to your deployed frontend's real origin(s) once you know them.
+    FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+
+    # --- GROQ (FALLBACK PROVIDER) ---
+    # Groq is no longer primary — it's the cross-provider fallback. The fallback
+    # model + routing live in the Portkey dashboard config (the @rag target);
+    # these just hold the credentials. The eval judge also uses Groq directly.
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    GROQ_MODEL = "llama-3.3-70b-versatile"
     GROQ_FALLBACK_API_KEY = os.getenv("GROQ_FALLBACK_API_KEY")
 
-    # # --- LLM GATEWAY (PORTKEY) ---
+    # --- LLM GATEWAY (PORTKEY) ---
+    # Saved dashboard config: OpenAI primary → Groq fallback, plus retry + cache.
     PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY")
     PORTKEY_CONFIG = os.getenv("PORTKEY_CONFIG")
-    GROQ_SLUG =  "rag"     # primary: @rag/llama-3.3-70b-versatile
-    GROQ_SLUG_2 = "rag2"  # fallback: @brag/llama-3.1-8b-instant
+    GROQ_SLUG = "rag"      # Portkey slug for the Groq fallback target (set in the dashboard config)
 
+    # --- OPENAI (PRIMARY LLM + EMBEDDINGS) ---
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_SLUG = "openai"                 # Portkey integration slug you created
+
+    # Model IDs per slot — change a model here, nowhere else
+    RESPONDER_MODEL  = "gpt-5-mini"        # writes the final answer
+    PLANNER_MODEL    = "gpt-4.1-nano"      # intent classification (tiny job)
+    GUARDRAILS_MODEL = "gpt-4.1-nano"      # safety / topic gate
+
+    # Fallback models (Groq) live in the Portkey dashboard config, not here.
+
+    # --- EMBEDDINGS (OPENAI) ---
+    EMBEDDING_MODEL = "text-embedding-3-small"
+    EMBEDDING_DIM   = 1536                 # this model's vector size
     
     # --- OBSERVABILITY ---
     # LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true")

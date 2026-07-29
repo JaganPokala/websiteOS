@@ -1,114 +1,51 @@
-import time
+# --- Imports: third-party ---
 import logfire
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from openai import OpenAI
+
+# --- Imports: local application ---
 from app.config import settings
 
-BATCH_SIZE = 10
-_GEMINI_DIM = 3072
-_FALLBACK_DIM = 768  # all-mpnet-base-v2
+# --- Config ---
+# OpenAI accepts large batches; 100 chunks per request stays well within limits.
+BATCH_SIZE = 100
 
-_active_model = None
-_model_type: str | None = None  # "gemini" or "fallback"
+_client: OpenAI | None = None
 
 
-# ── Model initialisation ───────────────────────────────────────────────────────
-
-def _probe_gemini():
-    """Try one embed call to verify Gemini is reachable. Returns model or None."""
-    try:
-        model = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-2-preview",
-            google_api_key=settings.GEMINI_API_KEY,
+# --- Client setup ---
+def _get_client() -> OpenAI:
+    """Create the OpenAI client once, on first use."""
+    global _client
+    if _client is None:
+        _client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        logfire.info(
+            f"OpenAI embeddings ready ({settings.EMBEDDING_MODEL}, {settings.EMBEDDING_DIM}-dim)."
         )
-        model.embed_query("probe")
-        logfire.info("Gemini embeddings ready (gemini-embedding-2-preview, 3072-dim).")
-        return model
-    except Exception as e:
-        logfire.warning(f"Gemini probe failed: {e}. Will use sentence-transformers fallback.")
-        return None
+    return _client
 
 
-def _load_fallback():
-    from sentence_transformers import SentenceTransformer
-    logfire.info("Loading sentence-transformers fallback (all-mpnet-base-v2, 768-dim).")
-    return SentenceTransformer("all-mpnet-base-v2")
-
-
-def _init():
-    """Initialise embedding model once per process. Called lazily on first use."""
-    global _active_model, _model_type
-    if _active_model is not None:
-        return
-    
-    # Force local model — no API, no rate limits.
-    if settings.EMBEDDING_BACKEND == "local":
-        _active_model = _load_fallback()
-        _model_type = "fallback"
-        return
-
-    gemini = _probe_gemini()
-    if gemini:
-        _active_model = gemini
-        _model_type = "gemini"
-    else:
-        _active_model = _load_fallback()
-        _model_type = "fallback"
-
-
-# ── Public helpers ─────────────────────────────────────────────────────────────
-
+# --- Public API ---
 def get_embedding_dim() -> int:
-    """Return the vector dimension for the active model. Call after _init()."""
-    _init()
-    return _GEMINI_DIM if _model_type == "gemini" else _FALLBACK_DIM
+    """Vector size of the embedding model — used to size the Qdrant collection."""
+    return settings.EMBEDDING_DIM
 
-
-# ── Batch embedding with retry ─────────────────────────────────────────────────
-
-# Semantic search is great at not missing relevant docs (high recall) — it casts a wide
-# net and pulls the top-k candidates. But within that top-k, the ordering is often wrong:
-# the truly best answer might be ranked #7 while a keyword-similar-but-off-topic chunk 
-# sits at #1. Cosine similarity ranks by "vibes similarity," not "does this actually answer
-# the question."
-
-def _embed_batch(batch: list[str]) -> list[list[float]]:
-    if _model_type == "gemini":
-        # Exponential backoff: 1 s → 2 s → 4 s → 8 s (4 attempts total)
-        for attempt in range(4):
-            try:
-                return _active_model.embed_documents(batch)
-            except Exception as e:
-                err = str(e).lower()
-                is_rate_limit = any(x in err for x in ("429", "rate", "quota", "resource_exhausted"))
-                if is_rate_limit and attempt < 3:
-                    wait = 2 ** attempt
-                    logfire.warning(
-                        f"Gemini rate limit hit — retrying in {wait}s "
-                        f"(attempt {attempt + 1}/4)."
-                    )
-                    time.sleep(wait)
-                else:
-                    logfire.error(f"Gemini embedding failed: {e}")
-                    raise
-        raise RuntimeError("Gemini rate limit persisted after 4 attempts.")
-    else:
-        return _active_model.encode(batch, show_progress_bar=False).tolist()
-
-
-# ── Public API (same signatures as before) ─────────────────────────────────────
 
 def embed_query(query: str) -> list[float]:
-    _init()
-    if _model_type == "gemini":
-        return _active_model.embed_query(query)
-    return _active_model.encode([query])[0].tolist()
+    """Embed a single query string → one vector."""
+    client = _get_client()
+    resp = client.embeddings.create(model=settings.EMBEDDING_MODEL, input=query)
+    return resp.data[0].embedding
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    _init()
+    """Embed many chunks in batches. Order is preserved to match the input list."""
+    client = _get_client()
     all_embeddings: list[list[float]] = []
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i : i + BATCH_SIZE]
-        with logfire.span("Embed batch", model=_model_type, start=i, size=len(batch)):
-            all_embeddings.extend(_embed_batch(batch))
+        with logfire.span("Embed batch", model=settings.EMBEDDING_MODEL, start=i, size=len(batch)):
+            resp = client.embeddings.create(model=settings.EMBEDDING_MODEL, input=batch)
+            # Sort by index so vectors line up with input order, regardless of API ordering.
+            ordered = sorted(resp.data, key=lambda d: d.index)
+            all_embeddings.extend(d.embedding for d in ordered)
     return all_embeddings

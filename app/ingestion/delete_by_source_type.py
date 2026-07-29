@@ -6,19 +6,24 @@ Usage:
     python -m app.ingestion.delete_by_source_type noisy --file report.pdf
     python -m app.ingestion.delete_by_source_type noisy --count   # just count, don't delete
 """
+# --- Imports: standard library ---
 import sys
-import logfire
 
+# --- Imports: third-party ---
+import logfire
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
+# --- Imports: local application ---
 from app.config import settings
 
 logfire.configure(service_name="enterprise-ingestion-service")
 
+# --- Client setup ---
 client = QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY, timeout=120)
 
 
+# --- Functions ---
 def ensure_payload_indexes():
     """Qdrant requires a keyword payload index before filtering on a field."""
     for field in ("source_type", "source"):
@@ -80,5 +85,6 @@ def main():
         print(f"Deleted {n} points.")
 
 
+# --- CLI entry point ---
 if __name__ == "__main__":
     main()

@@ -1,25 +1,29 @@
+# --- Imports: standard library ---
+import json
 import os
 import sys
 import uuid
-import json
-import logfire
 
+# --- Imports: third-party ---
+import logfire
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
+# --- Imports: local application ---
 from app.config import settings
-from app.services.retrieval.embedding import embed_texts, get_embedding_dim
-from app.ingestion.loaders.pdf import parse_pdf
-from app.ingestion.loaders.html import parse_html
-from app.ingestion.loaders.text import parse_text
 from app.ingestion.chunking.splitter import chunk_text
+from app.ingestion.loaders.html import parse_html
+from app.ingestion.loaders.pdf import parse_pdf
+from app.ingestion.loaders.text import parse_text
+from app.services.retrieval.embedding import embed_texts, get_embedding_dim
 
 logfire.configure(service_name="enterprise-ingestion-service")
 
+# --- Config ---
 # Local folder where parsed + chunked JSON metadata is saved (replaces GCS processed bucket)
 PROCESSED_DATA_DIR = "processed_data"
 
-# Initialize Qdrant Client
+# --- Client setup ---
 qdrant_client = QdrantClient(
     url=settings.QDRANT_URL,
     api_key=settings.QDRANT_API_KEY,
@@ -27,6 +31,7 @@ qdrant_client = QdrantClient(
 )
 
 
+# --- Ingestion pipeline ---
 def save_processed_locally(data: dict, source_type: str, filename: str) -> str:
     """Save parsed chunk metadata as JSON in processed_data/<source_type>/."""
     folder = os.path.join(PROCESSED_DATA_DIR, source_type)
@@ -166,6 +171,7 @@ def run_universal_ingestion(base_dir: str, explicit_source_type: str = None, wip
                 process_directory(os.path.join(base_dir, subdir), source_type)
 
 
+# --- CLI entry point ---
 if __name__ == "__main__":
     # Usage:
     #   python -m app.ingestion.processor DATA --wipe

@@ -1,4 +1,6 @@
+# --- Imports ---
 import logfire
+
 
 def parse_text(file_path: str):
     """

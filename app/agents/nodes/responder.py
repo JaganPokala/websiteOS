@@ -1,13 +1,31 @@
+# --- Imports: third-party ---
 import logfire
+
+# --- Imports: local application ---
 from app.agents.state import AgentState
-from app.gateway import portkey_client, extract_cache_status
+from app.config import settings
+from app.gateway import get_langchain_llm
+
+# Portkey-backed LLM (gpt-5-mini). Using the LangChain client (not the native
+# Portkey one) lets LangGraph stream this node's tokens to the client via
+# astream(stream_mode="messages"). Trade-off: we lose the cache-hit header,
+# but Portkey's dashboard still logs every HIT/MISS.
+# temperature=None: gpt-5-mini is reasoning-tier and rejects any explicit
+# temperature (including the client's default of 0) with a 400 — only the
+# model's own default (1) is accepted, so we omit the parameter entirely.
+llm = get_langchain_llm(
+    model=f"@{settings.OPENAI_SLUG}/{settings.RESPONDER_MODEL}",
+    feature="responder",
+    temperature=None,
+    reasoning_effort="medium",
+)
 
 
-def generate_node(state: AgentState):
+async def generate_node(state: AgentState):
     """
-    Synthesizes a response using both Documentation Context AND Conversation History.
-    Uses the native Portkey client (not LangChain) so we can read the
-    x-portkey-cache-status response header and surface Cache: Hit in the UI.
+    Synthesizes the answer from Documentation Context AND Conversation History.
+    Streams tokens (llm.astream) so the endpoint can push them to the client;
+    also accumulates the full answer so the checkpointer can save it.
     """
     query = state["current_query"]
 
@@ -32,20 +50,20 @@ def generate_node(state: AgentState):
         """
     else:
         logfire.info("Generating technical RAG response.")
-        max_context_chars = 25000
+        max_context_chars = 10000
         full_context = ""
-
         for doc in state["documents"]:
             if len(full_context) + len(doc) < max_context_chars:
                 full_context += doc + "\n\n"
             else:
-                logfire.warning("Context truncated to fit Groq TPM limits.")
+                logfire.warning("Context truncated to fit the model's token limit.")
                 break
 
         prompt = f"""
         You are a Senior Technical Architect.
-        Answer the question using the TECHNICAL CONTEXT provided.
+        Answer the question using the TECHNICAL CONTEXT provided, in short and simple manner.
 
+        
         TECHNICAL CONTEXT:
         {full_context}
 
@@ -57,33 +75,15 @@ def generate_node(state: AgentState):
         """
 
     with logfire.span("✍️ LLM Synthesis"):
-        try:
-            # why here we are using client and using .completions 
-            # but in planner we are directly using llm 
-            response = portkey_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
-            )
-            content = response.choices[0].message.content
-            cache_status = extract_cache_status(response)
-            is_cache_hit = cache_status == "HIT"
+        # Stream tokens as they generate, and accumulate the full answer.
+        content = ""
+        async for chunk in llm.astream(prompt):
+            content += chunk.content or ""
+        logfire.info("✅ Response synthesised via LLM.")
 
-            if is_cache_hit:
-                logfire.info("⚡ Gateway Cache Hit — response served from Portkey cache.")
-                plan_update = state["plan"] + ["Cache: Hit ⚡"]
-                status = "Cache hit — instant response."
-            else:
-                logfire.info("✅ Response synthesised via LLM.")
-                plan_update = state["plan"]
-                status = "Response generated."
-
-            return {
-                "final_answer": content,
-                "status": status,
-                "plan": plan_update,
-                "messages": [{"role": "assistant", "content": content}]
-            }
-
-        except Exception as e:
-            logfire.error(f"LLM Generation failed: {e}")
-            raise e
+    return {
+        "final_answer": content,
+        "status": "Response generated.",
+        "plan": state["plan"],
+        "messages": [{"role": "assistant", "content": content}],
+    }

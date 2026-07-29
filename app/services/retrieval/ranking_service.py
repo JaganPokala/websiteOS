@@ -1,4 +1,7 @@
+# --- Imports: standard library ---
 import time
+
+# --- Imports: third-party ---
 import logfire
 from flashrank import Ranker, RerankRequest
 
@@ -6,6 +9,7 @@ from flashrank import Ranker, RerankRequest
 _ranker = None
 
 
+# --- Client setup ---
 def _get_ranker() -> Ranker:
     """
     Initializes the FlashRank engine lazily. 
@@ -22,7 +26,7 @@ def _get_ranker() -> Ranker:
     return _ranker
 
 
-
+# --- Public API ---
 def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[str]:
     """
     Refines retrieval results by re-scoring documents against the query semantically.
