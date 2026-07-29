@@ -35,6 +35,7 @@ metadata.pkl
 # Data — raw ingestion corpus, not needed at runtime; keep local-only
 DATA/
 processed_data/
+notebooks/
 
 # IDEs
 .vscode/
