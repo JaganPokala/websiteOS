@@ -23,6 +23,14 @@ class Settings:
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
     QDRANT_COLLECTION = "enterprise_rag"
 
+    # --- RERANKING (FLASHRANK) ---
+    # FlashRank loads a local ONNX cross-encoder model into process memory on
+    # first use — real weight on memory-constrained hosts (e.g. Render's free
+    # tier). Defaults to OFF for now (raw Qdrant order) to stay inside the
+    # free tier's memory limit; set RERANK_ENABLED=true (env var, no code
+    # change needed) whenever you want to turn it back on.
+    RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
+
     # --- CONVERSATION MEMORY (POSTGRES CHECKPOINTER) ---
     # Connection string, e.g. postgresql://user:pass@host/dbname
     # Neon: dashboard → Connect → copy the string WITHOUT "-pooler" in the host
