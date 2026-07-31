@@ -1,0 +1,35 @@
+# Keep the build context small: everything here is either huge, secret, or
+# never imported by the running API (verified — nothing outside app/ingestion/
+# imports the doc-parsing, eval, or Streamlit libraries).
+
+# Local virtualenv — the image installs its own deps from requirements.txt
+.venv/
+
+# Frontend is deployed separately as a static site
+frontend/
+
+# Corpus + ingestion output: used by `python -m app.ingestion.processor` locally,
+# never by the API at runtime (vectors already live in Qdrant Cloud)
+DATA/
+processed_data/
+
+# Dev-only surfaces, not part of the deployed API
+notebooks/
+evals/
+ui/
+scripts/
+
+# Tooling / VCS metadata
+.git/
+.claude/
+.logfire/
+
+__pycache__/
+*.pyc
+
+# Secrets never belong in an image — they're supplied at run time via
+# --env-file locally and the host's env vars in production
+.env
+.env.example
+
+*.md

@@ -10,7 +10,11 @@ import copy
 import requests
 import logfire
 
+from evals._eval_client import get_auth_headers, new_conversation_id
+
 API_URL = "http://localhost:8000/query"
+# Same reasoning as pipeline.py — matches RATE_LIMIT_MAX=20 in .env.
+DELAY_BETWEEN_CALLS = 4
 
 
 def _is_blocked(response_json: dict) -> bool:
@@ -38,9 +42,11 @@ def run_guardrails_eval(guardrails_samples: list, progress_callback=None) -> lis
                 expected_blocked=sample["expected_blocked"],
             ):
                 try:
+                    conversation_id = new_conversation_id()
                     resp = requests.post(
                         API_URL,
-                        json={"q": sample["input"], "thread_id": f"guardrail_eval_{i}"},
+                        json={"q": sample["input"], "conversation_id": conversation_id},
+                        headers=get_auth_headers(),
                         timeout=30,
                     )
                     resp.raise_for_status()
@@ -73,7 +79,7 @@ def run_guardrails_eval(guardrails_samples: list, progress_callback=None) -> lis
                     input_preview=sample["input"][:60],
                 )
 
-            time.sleep(2)
+            time.sleep(DELAY_BETWEEN_CALLS)
 
     return samples
 

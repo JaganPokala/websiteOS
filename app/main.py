@@ -68,6 +68,9 @@ async def lifespan(app: FastAPI):
     ) as pool:
         checkpointer = AsyncPostgresSaver(pool)
         await checkpointer.setup()  # idempotent: creates its tables on first run
+        # some kind of mechanism to store the graph state
+        # after every super step base on thread_id 
+ 
         graph.compile_graph(checkpointer)
         db.set_pool(pool)
         logfire.info("💾 Postgres checkpointer ready (pooled) — conversations survive restarts.")
@@ -155,9 +158,11 @@ async def query(
             with logfire.span("💾 DB: Save Assistant Message"):
                 await conv_service.add_message(pool, conversation_id, "assistant", rail_response)
             return {
-                "question": q, "answer": rail_response,
+                "question": q, 
+                "answer": rail_response,
                 "thought_process": ["Intent: Guardrails Fired", "Retrieval: Skipped"],
-                "status": "Blocked by guardrails.", "sources": [],
+                "status": "Blocked by guardrails.",
+                "sources": [],
             }
 
         final_output = await graph.rag_agent.ainvoke(initial_state, config=config)
@@ -188,9 +193,9 @@ def _sse(payload: dict) -> str:
 
 @app.post("/query/stream")
 async def query_stream(
-    body: QueryRequest, 
-    user_id: str = Depends(get_current_user_id),
-    _: None = Depends(enforce_rate_limit),
+        body: QueryRequest, 
+        user_id: str = Depends(get_current_user_id),
+        _: None = Depends(enforce_rate_limit),
     ):
     """
     Authenticated streaming query. Emits four kinds of SSE event:
@@ -212,14 +217,16 @@ async def query_stream(
     thread_id = str(conversation_id)
     initial_state = {
         "messages": [{"role": "user", "content": q}],
-        "current_query": q, "documents": [], "plan": ["Start"],
+        "current_query": q, 
+        "documents": [], 
+        "plan": ["Start"],
         "status": "Initializing Graph...",
     }
     config = {"configurable": {"thread_id": thread_id}}
 
     async def event_stream():
         try:
-            yield _sse({"status": "Checking your question"})
+            yield _sse({"status": "Processing your question"})
             rail_fired, rail_response = await guard(q)
             if rail_fired:
                 await conv_service.add_message(pool, conversation_id, "assistant", rail_response)

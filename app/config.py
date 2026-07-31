@@ -24,12 +24,14 @@ class Settings:
     QDRANT_COLLECTION = "enterprise_rag"
 
     # --- RERANKING (FLASHRANK) ---
-    # FlashRank loads a local ONNX cross-encoder model into process memory on
-    # first use — real weight on memory-constrained hosts (e.g. Render's free
-    # tier). Defaults to OFF for now (raw Qdrant order) to stay inside the
-    # free tier's memory limit; set RERANK_ENABLED=true (env var, no code
-    # change needed) whenever you want to turn it back on.
-    RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
+    # Reranking is the intended behaviour: Qdrant returns 15 candidates, FlashRank
+    # scores all of them against the query, and the top 5 go to the responder.
+    # Defaults to ON so a forgotten env var can't silently degrade answer quality —
+    # on an undersized host this fails loudly (FlashRank's ONNX model loads into
+    # process memory on first rerank) instead of quietly serving raw vector order.
+    # Set RERANK_ENABLED=false to fall back to raw Qdrant order — the deliberate
+    # graceful-degradation lever, not the default.
+    RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
 
     # --- CONVERSATION MEMORY (POSTGRES CHECKPOINTER) ---
     # Connection string, e.g. postgresql://user:pass@host/dbname
@@ -38,6 +40,9 @@ class Settings:
 
     # --- RATE LIMITING (REDIS) ---
     REDIS_URL = os.getenv("REDIS_URL")
+    # Bump this in .env when running the eval suite (many /query calls in a
+    # short window) — leave it at the default for real traffic.
+    RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "5"))
 
     # --- CORS ---
     # Comma-separated list of origins allowed to call this API. Defaults to the

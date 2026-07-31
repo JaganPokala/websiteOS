@@ -1,16 +1,17 @@
 """
 Phase 2 — RAGAS + Tool Correctness metrics.
-Uses JUDGE_GROQ key so production GROQ_API_KEY is never exhausted by eval runs.
-All LLM-based metrics run in batches of 5 with 30s cooldowns between sub-batches
-and 60s cooldowns between experiments — calibrated for Groq's 6,000 TPM on_demand tier.
-Contexts are truncated to 300 chars (2 chunks max) so no single request exceeds the limit.
+Judge is gpt-4.1-nano via OpenAI directly (OPENAI_API_KEY) — same key the rest
+of the app already uses for planner/guardrails. OpenAI's rate limits are high
+enough that all samples run in a single batch per experiment, no cooldowns
+needed (unlike the old Groq judge, whose free-tier 6,000 TPM ceiling forced
+one-sample-at-a-time pacing with 40-62s waits between batches).
+Contexts are still truncated to 300 chars (2 chunks max) to keep each judge
+call small and cheap — not for rate-limit reasons anymore, just cost/speed.
 """
 
 
-import os
 import sys
 import types
-import asyncio
 import logfire
 import pandas as pd
 from openai import AsyncOpenAI
@@ -42,41 +43,27 @@ from ragas.metrics.collections import (
     AnswerCorrectness,
 )
 
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-JUDGE_MODEL = "llama-3.1-8b-instant"
-COOLDOWN_STANDARD = 62
-COOLDOWN_MINI = 40       # between individual samples — lets sliding TPM window recover (~2,800 tok/sample)
-GENERAL_BATCH_SIZE = 1  # one sample at a time: abatch_score fires calls concurrently per sample,
-                         # so batch>1 stacks multiple samples' async calls inside the same second
-CONTEXT_TRUNCATE = 300  # chars per context chunk — reduces single request from ~7,700 to ~400 tokens
-CONTEXT_LIMIT = 2       # number of context chunks passed to RAGAS per sample
+JUDGE_MODEL = "gpt-4.1-nano"
+GENERAL_BATCH_SIZE = 20  # comfortably above the 15-sample dataset — always one real batch
+CONTEXT_TRUNCATE = 300   # chars per context chunk — keeps each judge call small and cheap
+CONTEXT_LIMIT = 2        # number of context chunks passed to RAGAS per sample
 
 
 def _build_judge():
-    api_key = os.getenv("JUDGE_GROQ") or os.getenv("GROQ_API_KEY")
-    client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
+    # One client for both: the judge LLM and the embeddings model are both
+    # OpenAI now, unlike the old Groq judge which needed a second client just
+    # to reach OpenAI for embeddings (Groq doesn't serve embedding models).
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
 
     # Same embedding model the live RAG pipeline uses to embed queries
     # (app/services/retrieval/embedding.py) — not an unrelated local model.
-    # Scores from AnswerRelevancy/AnswerCorrectness now measure similarity in
-    # the SAME vector space retrieval actually runs in, not a different one.
-    # A separate client: the judge LLM above talks to Groq, but Groq doesn't
-    # serve this embedding model — embeddings still go to OpenAI directly.
-    embedding_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    embeddings = OpenAIEmbeddings(client=embedding_client, model=settings.EMBEDDING_MODEL)
+    # Scores from AnswerRelevancy/AnswerCorrectness measure similarity in the
+    # SAME vector space retrieval actually runs in, not a different one.
+    embeddings = OpenAIEmbeddings(client=client, model=settings.EMBEDDING_MODEL)
     return llm, embeddings
 
-async def _cooldown(seconds: int, label: str, status_cb=None):
-    msg = f"⏳ {seconds}s cooldown after {label} (Groq TPM buffer)..."
-    if status_cb:
-        status_cb(msg)
-    for _ in range(seconds // 10):
-        await asyncio.sleep(10)
-    if status_cb:
-        status_cb(f"✅ Ready — starting next experiment.")
-        
-        
+
 def _prep_samples(golden_dataset: dict) -> list:
     """
     Returns only samples with actual_response populated.
@@ -105,14 +92,14 @@ def _score_df(metric_key: str, samples: list, scores) -> pd.DataFrame:
 
 async def _batched_score(metric, inputs: list, samples: list, status_cb=None, label: str = "") -> list:
     """
-    Runs abatch_score in chunks of GENERAL_BATCH_SIZE with cooldowns between chunks.
-    Keeps each burst under 6,000 TPM on Groq's on_demand tier.
+    Runs abatch_score in chunks of GENERAL_BATCH_SIZE. With OpenAI's rate limits,
+    GENERAL_BATCH_SIZE is set above the dataset size, so this is always one batch —
+    the chunking loop stays only so a bigger dataset degrades gracefully instead
+    of firing an unbounded burst of concurrent calls.
     """
     all_scores = []
     batches = [inputs[i : i + GENERAL_BATCH_SIZE] for i in range(0, len(inputs), GENERAL_BATCH_SIZE)]
-    for b_idx, batch in enumerate(batches):
-        if b_idx > 0:
-            await _cooldown(COOLDOWN_MINI, f"{label} batch {b_idx}", status_cb)
+    for batch in batches:
         scores = await metric.abatch_score(batch)
         all_scores.extend(scores)
     return all_scores
@@ -149,8 +136,6 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
             results["faithfulness"] = df
             logfire.info("🧪 Faithfulness done", avg=round(df["faithfulness"].mean(), 3))
 
-        await _cooldown(COOLDOWN_STANDARD, "Faithfulness", status_cb)
-
         # ── Exp 2: Answer Relevancy ───────────────────────────────────────────
         if status_cb:
             status_cb(f"🧪 Exp 2/6 — Answer Relevancy ({len(samples)} samples)...")
@@ -166,8 +151,6 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
             df = _score_df("answer_relevancy", samples, scores)
             results["answer_relevancy"] = df
             logfire.info("🧪 Answer Relevancy done", avg=round(df["answer_relevancy"].mean(), 3))
-
-        await _cooldown(COOLDOWN_STANDARD, "Answer Relevancy", status_cb)
 
         # ── Exp 3: Context Precision ──────────────────────────────────────────
         if status_cb:
@@ -186,8 +169,6 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
             results["context_precision"] = df
             logfire.info("🧪 Context Precision done", avg=round(df["context_precision"].mean(), 3))
 
-        await _cooldown(COOLDOWN_STANDARD, "Context Precision", status_cb)
-
         # ── Exp 4: Context Recall ─────────────────────────────────────────────
         if status_cb:
             status_cb(f"🧪 Exp 4/6 — Context Recall ({len(samples)} samples)...")
@@ -204,8 +185,6 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
             df = _score_df("context_recall", samples, scores)
             results["context_recall"] = df
             logfire.info("🧪 Context Recall done", avg=round(df["context_recall"].mean(), 3))
-
-        await _cooldown(COOLDOWN_STANDARD, "Context Recall", status_cb)
 
         # ── Exp 5: Answer Correctness (split into batches) ────────────────────
         if status_cb:
@@ -226,8 +205,6 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
             df = _score_df("answer_correctness", samples, all_scores)
             results["answer_correctness"] = df
             logfire.info("🧪 Answer Correctness done", avg=round(df["answer_correctness"].mean(), 3))
-
-        await _cooldown(COOLDOWN_STANDARD, "Answer Correctness", status_cb)
 
         # ── Exp 6: Tool Correctness (no LLM — Jaccard) ───────────────────────
         if status_cb:

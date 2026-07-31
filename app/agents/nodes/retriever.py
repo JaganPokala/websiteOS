@@ -21,7 +21,7 @@ async def retrieve_node(state: AgentState):
     # Standard Retrieval Logic
     with logfire.span("🔍 Knowledge Retrieval"):
         logfire.info(f"Searching Qdrant for: {query}")
-        raw_results = await search_enterprise_knowledge(query, limit=5)
+        raw_results = await search_enterprise_knowledge(query, limit=15)
         logfire.info(f"Retrieved {len(raw_results)} candidates from Vector DB")
 
         doc_contents = [doc['content'] for doc in raw_results]
@@ -31,14 +31,14 @@ async def retrieve_node(state: AgentState):
                 # FlashRank is CPU-bound (no async twin exists) — run it on a helper
                 # thread so the event loop keeps serving other requests meanwhile.
                 reranked_contents = await asyncio.to_thread(
-                    rerank_documents, query, doc_contents, top_n=3
+                    rerank_documents, query, doc_contents, top_n=5
                 )
-                logfire.info("Reranking complete. Kept top 3 most relevant chunks.")
+                logfire.info("Reranking complete. Kept top 5 most relevant chunks.")
         else:
             # Skips rerank_documents() entirely, so FlashRank's Ranker() never
             # gets constructed and its ONNX model never loads into memory —
             # not just a faster no-op, an actual avoided allocation.
-            reranked_contents = doc_contents[:3]
+            reranked_contents = doc_contents[:5]
             logfire.info("⚠️ Reranking disabled (RERANK_ENABLED=false) — using raw Qdrant order.")
 
         formatted_docs = [f"CONTENT: {doc}" for doc in reranked_contents]

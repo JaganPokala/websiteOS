@@ -25,6 +25,8 @@ def initialize_rails() -> None:
         feature="guardrails",
     )
 
+
+     
     config = RailsConfig.from_content(
         colang_content=COLANG_CONTENT,
         yaml_content=YAML_CONTENT

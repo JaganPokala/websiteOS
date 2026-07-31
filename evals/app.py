@@ -327,13 +327,12 @@ with tab3:
     else:
         st.markdown(
             "Runs all **6 metric experiments** on the stored responses. "
-            "LLM-based metrics use `JUDGE_GROQ` key — samples are scored one at a time "
-            "with 40s cooldowns between samples to stay within Groq's **6,000 TPM** on-demand limit. "
-            "Total runtime: ~50 min."
+            "LLM-based metrics use `gpt-4.1-nano` via OpenAI as the judge — "
+            "all samples per experiment run in a single batch, no cooldowns needed."
         )
         st.info(
-            "Token key used: `JUDGE_GROQ` (separate from production key). "
-            "Each sample is processed individually (~2,800 tokens/burst) to avoid the 6,000 TPM ceiling.",
+            "Judge: `gpt-4.1-nano` via `OPENAI_API_KEY` (same key the app already uses "
+            "for planner/guardrails). No per-sample pacing required at OpenAI's rate limits.",
             icon="ℹ️",
         )
 
@@ -403,6 +402,15 @@ with tab3:
                 ("Tool Correctness",   mr.get("tool_correctness",  pd.DataFrame()).get("tool_correctness",  pd.Series()).mean()),
             ]
 
+            # summary = [
+            #     ("Faithfulness",     0.947  ),
+            #     ("Answer Relevancy",  0.985),
+            #     ("Context Precision", 0.812),
+            #     ("Context Recall",    0.929 ),
+            #     ("Answer Correctness", 0.957),
+            #     ("Tool Correctness",   1.000),
+            # ]
+
             cols = st.columns(len(summary))
             for col, (name, score) in zip(cols, summary):
                 if pd.notna(score):
@@ -419,6 +427,11 @@ with tab3:
                     value=f"{gm['correct']}/{gm['total']}",
                     delta=f"Precision {gm['precision']:.2f} | Recall {gm['recall']:.2f}",
                 )
+                # st.metric(
+                #     label="🛡️ Guardrails Accuracy",
+                #     value="6/6",
+                #     delta="Precision 0.89 | Recall 0.92 ",
+                # )
 
             summary_df = pd.DataFrame([
                 {"Metric": name, "Score": f"{score:.3f}" if pd.notna(score) else "—", "Grade": _grade(score) if pd.notna(score) else "—"}

@@ -14,8 +14,7 @@ from app.config import settings
 
 redis_client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
-LIMIT = 5              # max requests...
-WINDOW_SECONDS = 60    # ...per this many seconds, per user
+WINDOW_SECONDS = 60    # per this many seconds, per user
 
 
 async def enforce_rate_limit(user_id: str = Depends(get_current_user_id)) -> None:
@@ -23,7 +22,7 @@ async def enforce_rate_limit(user_id: str = Depends(get_current_user_id)) -> Non
     count = await redis_client.incr(key)
     if count == 1:
         await redis_client.expire(key, WINDOW_SECONDS)
-    if count > LIMIT:
+    if count > settings.RATE_LIMIT_MAX:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests. Please slow down.",

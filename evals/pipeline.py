@@ -13,9 +13,14 @@ import os
 import requests
 import logfire
 
+from evals._eval_client import get_auth_headers, new_conversation_id
+
 API_URL = "http://localhost:8000/query"
 RESPONSE_TRUNCATE = 300
-DELAY_BETWEEN_CALLS = 10   # seconds — stays within Groq RPM on the main key
+# Matches RATE_LIMIT_MAX=20 (set in .env for eval runs) — 60/20 = 3s minimum
+# to never exceed the window; 4s keeps a small safety margin. If you run evals
+# with RATE_LIMIT_MAX back at its default of 5, raise this back to ~15s.
+DELAY_BETWEEN_CALLS = 4
 REQUEST_TIMEOUT = 120      # seconds — guardrails + LangGraph + Groq can take >60s
 
 
@@ -61,9 +66,11 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
                 domain=sample.get("domain", ""),
             ):
                 try:
+                    conversation_id = new_conversation_id()
                     resp = requests.post(
                         API_URL,
-                        json={"q": question, "thread_id": f"eval_run_{i}"},
+                        json={"q": question, "conversation_id": conversation_id},
+                        headers=get_auth_headers(),
                         timeout=REQUEST_TIMEOUT,
                     )
                     resp.raise_for_status()
@@ -99,8 +106,11 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
             if progress_callback:
                 progress_callback(i, n, question, "done", sample["actual_response"])
 
-            if i < n - 1:
-                time.sleep(DELAY_BETWEEN_CALLS)
+            # Unconditional — sleeps after the LAST sample too, not just between
+            # samples. app.py runs guardrails_eval immediately after this
+            # function returns, on the same rate-limited user; without this,
+            # the phase boundary itself could land two /query calls too close.
+            time.sleep(DELAY_BETWEEN_CALLS)
 
     return dataset
 
