@@ -11,7 +11,9 @@ load_dotenv()
 logfire.configure(token=os.getenv("LOGFIRE_TOKEN"))
 
 # --- Imports: standard library ---
+import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Optional
 from uuid import UUID
@@ -43,6 +45,16 @@ async def lifespan(app: FastAPI):
     Startup: init guardrails, open the Postgres checkpointer, compile the graph.
     Shutdown: leaving the async-with closes the Postgres connection cleanly.
     """
+    # asyncio.to_thread() uses the loop's default executor, which sizes itself to
+    # min(32, cpu_count + 4) — on a many-core host that's up to 32 threads, each
+    # with its own glibc arena (see MALLOC_ARENA_MAX in the Dockerfile). We only
+    # to_thread two things (embeddings, FlashRank), and the real concurrency limit
+    # is the host's request concurrency anyway, so a small fixed pool is plenty
+    # and keeps RSS from scaling with whatever CPU count the host reports.
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=4, thread_name_prefix="rag-worker")
+    )
+
     initialize_rails()
 
     if not settings.POSTGRES_URI:

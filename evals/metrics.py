@@ -54,7 +54,11 @@ def _build_judge():
     # OpenAI now, unlike the old Groq judge which needed a second client just
     # to reach OpenAI for embeddings (Groq doesn't serve embedding models).
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
+    # max_tokens: ragas defaults to 1024, which truncates Faithfulness's structured
+    # output — it emits one NLI verdict per extracted statement, so a multi-statement
+    # answer overruns the cap and instructor raises IncompleteOutputException mid-run.
+    # ragas' own docs recommend 4096+ for exactly this failure.
+    llm = llm_factory(JUDGE_MODEL, provider="openai", client=client, max_tokens=4096)
 
     # Same embedding model the live RAG pipeline uses to embed queries
     # (app/services/retrieval/embedding.py) — not an unrelated local model.

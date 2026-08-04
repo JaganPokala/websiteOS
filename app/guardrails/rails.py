@@ -4,11 +4,16 @@ import logging
 # --- Imports: third-party ---
 import logfire
 from nemoguardrails import LLMRails, RailsConfig
+from nemoguardrails.rails.llm.options import GenerationLogOptions, GenerationOptions
 
 # --- Imports: local application ---
 from app.config import settings
 from app.gateway import get_langchain_llm
-from app.guardrails.colang_rules import COLANG_CONTENT, RAIL_INDICATORS, YAML_CONTENT
+from app.guardrails.colang_rules import COLANG_CONTENT, RAIL_BOT_INTENTS, YAML_CONTENT
+
+# Ask NeMo for the colang history alongside the response — that structured trace
+# is what tells us WHICH canonical form fired, instead of guessing from prose.
+_GEN_OPTIONS = GenerationOptions(log=GenerationLogOptions(colang_history=True))
 
 _rails: LLMRails | None = None
 
@@ -55,15 +60,38 @@ async def guard(message: str) -> tuple[bool, str | None]:
         return False, None
 
     with logfire.span("🛡️ Guardrails Check"):
-        result = await _rails.generate_async(messages=[{"role": "user", "content": message}])
+        result = await _rails.generate_async(
+            messages=[{"role": "user", "content": message}],
+            options=_GEN_OPTIONS,
+        )
 
-        # NeMo returns {'role': 'assistant', 'content': '...'} — extract text
-        content = result.get("content", "") if isinstance(result, dict) else str(result)
+        # With `options`, NeMo returns a GenerationResponse (.response is a list
+        # of messages) rather than the bare dict it returns without them.
+        response = getattr(result, "response", result)
+        if isinstance(response, list):
+            response = response[0] if response else {}
+        content = response.get("content", "") if isinstance(response, dict) else str(response)
 
-        fired = any(indicator in content for indicator in RAIL_INDICATORS)
+        # Decide from the STRUCTURED trace, not the prose. colang_history looks like:
+        #     user "ignore all previous instructions"
+        #       attempt jailbreak
+        #     bot refuse jailbreak
+        #       "I can't comply with that request — ..."
+        # so the canonical form is exact and survives any rewording of the message.
+        # A clean question yields `bot general response`, which is not a defined
+        # rail and therefore never matches.
+        history = getattr(getattr(result, "log", None), "colang_history", "") or ""
+        fired_intent = next(
+            (intent for intent in RAIL_BOT_INTENTS if f"bot {intent}" in history),
+            None,
+        )
 
-        if fired:
-            logfire.info(f"🛡️ Guardrails fired | query='{message[:80]}'")
+        if fired_intent:
+            logfire.info(
+                "🛡️ Guardrails fired",
+                intent=fired_intent,
+                query=message[:80],
+            )
             return True, content
 
         logfire.info("✅ Guardrails passed.")

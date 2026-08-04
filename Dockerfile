@@ -2,6 +2,14 @@
 FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1
 
+# glibc hands every thread its own malloc arena, and freed memory in an arena is
+# usually NOT returned to the OS — so RSS grows with thread count and never
+# shrinks back. This app runs CPU-bound work (embeddings, FlashRank) through
+# asyncio.to_thread, so it spawns real threads on every technical query.
+# Capping arenas trades a little allocator contention for a much flatter RSS,
+# which is what matters on a memory-limited host.
+ENV MALLOC_ARENA_MAX=2
+
 WORKDIR /app
 
 COPY requirements.txt .

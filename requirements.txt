@@ -57,3 +57,8 @@ ragas                       # RAG-specific evaluation metrics (Faithfulness, Rel
 locust                      # Concurrency/load testing with a local web dashboard (scripts/locustfile.py)
 
 redis                       # Async Redis client for the global rate limiter (app/rate_limit.py)
+
+# --- CRAWLING (INGESTION-TIME ONLY) ---
+# Runs on the dev machine via app/ingestion/crawler.py, never inside the deployed
+# container — no headless browser needed since target docs sites are static HTML.
+trafilatura                 # HTML → clean markdown extraction (keeps headings, code blocks, LaTeX)

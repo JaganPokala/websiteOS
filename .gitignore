@@ -34,10 +34,16 @@ wheels/
 index.faiss
 metadata.pkl
 
-# Data — raw ingestion corpus, not needed at runtime; keep local-only
+# Data — raw ingestion corpus, not needed at runtime; keep local-only.
+# The app reads from Qdrant, never from these; they are only inputs to
+# `python -m app.ingestion.processor`. downloaded_data/ is ~2.9 MB of .pptx/.docx
+# and belongs in the same bucket as crawled_data/.
 DATA/
 processed_data/
 notebooks/
+crawled_data/
+downloaded_data/
+
 
 # IDEs
 .vscode/
@@ -50,6 +56,17 @@ Thumbs.db
 enterprise_env
 
 commands.md
+
+# Working notes — kept local, not part of the published repo.
+# Anchored to the repo root so a docs/DECISIONS.md later isn't caught by these.
+/DECISIONS.md
+/FAILURES.md
+/IDEAS.md
+/QUESTIONS.md
+/PLAN_MULTISITE.md
+
+# Word/PowerPoint lock files written while a document is open
+~$*
 
 .logfire
 
