@@ -50,20 +50,50 @@ async def generate_node(state: AgentState):
         """
     else:
         logfire.info("Generating technical RAG response.")
-        max_context_chars = 10000
+        max_context_chars = 15000
         full_context = ""
-        for doc in state["documents"]:
-            if len(full_context) + len(doc) < max_context_chars:
-                full_context += doc + "\n\n"
+
+        # STEP 1: state["documents"] is now a list of dicts, so iterate with an
+        #         index — enumerate(state["documents"], start=1) — and read the
+        #         text with doc["content"].
+        #
+        #         The bug being fixed: `len(doc)` on a dict returns the NUMBER OF
+        #         KEYS (7), not the text length. It doesn't raise — the budget
+        #         check just silently compares against 7 every time, and
+        #         `full_context += doc` stringifies the whole dict into the prompt.
+        for i, doc in enumerate(state["documents"], start=1):
+            # STEP 2: build one block per document. Number it so the model can refer
+            #         to a specific source.
+            #
+            #         No title or heading here — the chunker already prefixed every
+            #         chunk's text with its breadcrumb ("Binary Exponentiation >
+            #         Algorithm\n\n..."), so provenance is already inside
+            #         doc["content"]. Adding it again would duplicate it.
+            block = f"[{i}]\n{doc['content']}\n\n"
+
+            # STEP 3: keep the truncation guard, but measure the BLOCK you are
+            #         about to add, not the raw doc.
+            if len(full_context) + len(block) < max_context_chars:
+                full_context += block
             else:
-                logfire.warning("Context truncated to fit the model's token limit.")
+                logfire.warning(
+                    "Context budget reached — dropping the lowest-ranked documents.",
+                    kept=i - 1,
+                    total=len(state["documents"]),
+                    chars=len(full_context),
+                )
                 break
 
         prompt = f"""
         You are a Senior Technical Architect.
         Answer the question using the TECHNICAL CONTEXT provided, in short and simple manner.
 
-        
+        Each block in the TECHNICAL CONTEXT starts with a number in brackets, like [1].
+        When a statement comes from a block, cite that block inline right after the
+        statement, e.g. "CronJobs use cron syntax [2]." Cite only numbers that actually
+        appear below — never invent a source. If the context does not answer the
+        question, say so plainly instead of guessing.
+
         TECHNICAL CONTEXT:
         {full_context}
 

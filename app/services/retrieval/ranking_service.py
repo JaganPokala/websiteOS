@@ -27,15 +27,18 @@ def _get_ranker() -> Ranker:
 
 
 # --- Public API ---
-def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[str]:
+def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[int]:
     """
-    Refines retrieval results by re-scoring documents against the query semantically.
-    
-    Why FlashRank? 
-    Standard vector search (Cosine Similarity) is fast but mathematically "fuzzy."
-    FlashRank uses a Cross-Encoder approach which is much more precise but usually slow.
-    FlashRank solves this by using highly optimized, quantized ONNX models locally.
+    Re-scores documents against the query with a cross-encoder and returns the
+    INDICES of the best ones, highest score first.
+
+    Returns positions, not text, so the caller can map each result back to the
+    full record it came from (url, title, site). Returning text loses that link:
+    two chunks with identical content are indistinguishable, and matching them
+    back by string would attach the wrong citation URL to an answer — a wrong
+    link that looks perfectly valid.
     """
+    # STEP 1: empty input -> return [] (unchanged)
     if not documents:
         return []
 
@@ -44,28 +47,36 @@ def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[s
 
     try:
         ranker = _get_ranker()
-        
-        # FlashRank expects a list of dictionaries with 'id' and 'text'
+
+        # STEP 2: build passages exactly as now — {"id": i, "text": doc}.
+        #         The id is already the index; today line 60 throws it away by
+        #         returning only res['text']. That is the whole bug this fixes.
         passages = [
             {"id": i, "text": doc}
             for i, doc in enumerate(documents)
         ]
 
+        # STEP 3: run the reranker, take results[:top_n]
         request = RerankRequest(query=query, passages=passages)
         results = ranker.rerank(request)
-        
-        # Results are returned sorted by highest semantic score first
-        reranked_docs = []
-        for res in results[:top_n]:
-            reranked_docs.append(res['text'])
 
+        # STEP 4: return [res["id"] for res in results[:top_n]]
+        #         FlashRank returns them sorted by score descending, so the order of
+        #         this list IS the ranking — the caller must preserve it.
+        top_ids = [res["id"] for res in results[:top_n]]
+
+        # STEP 5: keep the logging as-is (duration + top score).
         duration = time.time() - start_time
         top_score = results[0]['score'] if results else 'N/A'
         logfire.info(f"✅ [Reranker] Done in {duration:.2f}s. Top semantic score: {top_score}")
-        
-        return reranked_docs
+
+        return top_ids
 
     except Exception as e:
         logfire.error(f"❌ [Reranker] Semantic Reranking Failed: {e}")
-        # Fallback to the original Qdrant order to ensure the user still gets an answer
-        return documents[:top_n]
+        # STEP 6: the except branch currently returns documents[:top_n].
+        #         It must now return INDICES for that same slice, so the caller's
+        #         mapping works identically on the fallback path.
+        #         Fallback to the original Qdrant order to ensure the user still
+        #         gets an answer.
+        return list(range(min(top_n, len(documents))))

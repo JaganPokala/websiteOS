@@ -77,6 +77,29 @@ class Settings:
     # --- EMBEDDINGS (OPENAI) ---
     EMBEDDING_MODEL = "text-embedding-3-small"
     EMBEDDING_DIM   = 1536                 # this model's vector size
+
+    # --- INGESTED SITES ---
+    # Served by GET /sites so the frontend never hardcodes these. `id` must match
+    # the `site` payload value written at ingestion time — it is what the Qdrant
+    # filter matches on, so a typo here means a site the user can select and that
+    # silently returns nothing.
+    #
+    # Hardcoded deliberately: the alternative is querying Qdrant for distinct
+    # `site` values, which has no cheap primitive (facet/scroll over 1,800+
+    # points per request) and still could not supply the display label or
+    # description. This list changes once per ingested site.
+    AVAILABLE_SITES = [
+        {
+            "id": "kubernetes.io",
+            "label": "Kubernetes",
+            "description": "Jobs, CronJobs, autoscaling and workload management",
+        },
+        {
+            "id": "cp-algorithms.com",
+            "label": "cp-algorithms",
+            "description": "Competitive programming algorithms and data structures",
+        },
+    ]
     
     # --- OBSERVABILITY ---
     # LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true")

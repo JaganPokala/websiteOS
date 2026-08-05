@@ -110,12 +110,29 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     q: str
     conversation_id: UUID          # this id IS the LangGraph thread_id
-
+    sites: list[str] | None = None
 
 # --- Routes ---
 @app.get("/")
 def home():
     return {"message": "Enterprise LangGraph RAG API is live."}
+
+
+@app.get("/sites")
+def list_sites():
+    """
+    The sites available to query, for the frontend's site picker.
+
+    Unauthenticated and uncached-by-choice: this is public catalogue data, it is
+    what the login screen would need to render anyway, and it is a static list
+    read from config — no DB or Qdrant round trip.
+
+    Each `id` is the exact `site` value stored on every chunk's payload, so the
+    frontend can post it straight back in QueryRequest.sites with no mapping
+    layer in between. That symmetry is the point: a display label and a filter
+    key that drift apart is how you get a picker whose options return nothing.
+    """
+    return {"sites": settings.AVAILABLE_SITES}
 
 
 @app.get("/graph")
@@ -161,6 +178,7 @@ async def query(
         "documents": [],
         "plan": ["Start"],
         "status": "Initializing Graph...",
+        "sites": body.sites or [],
     }
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -233,6 +251,7 @@ async def query_stream(
         "documents": [], 
         "plan": ["Start"],
         "status": "Initializing Graph...",
+        "sites": body.sites or [],
     }
     config = {"configurable": {"thread_id": thread_id}}
 
