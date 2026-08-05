@@ -23,6 +23,9 @@ export default function Sidebar({
   onToggleTheme,
   user,
   onLogout,
+  sites,
+  selectedSites,
+  onToggleSite,
 }) {
   return (
     // h-full is the fix: this element used to be a DIRECT grid child, and CSS
@@ -79,6 +82,40 @@ export default function Sidebar({
             <IconPlus width={16} height={16} />
             New chat
           </button>
+        )}
+
+        {/* --- site picker: which sources to search --- */}
+        {!collapsed && sites.length > 0 && (
+          <div className="flex-none">
+            <div className="mb-1.5 flex items-baseline justify-between px-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                Sources
+              </span>
+              {/* Empty selection means "search everything" — say so, otherwise
+                  it reads as a broken empty state rather than a default. */}
+              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                {selectedSites.length === 0 ? "All" : `${selectedSites.length} selected`}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-0.5">
+              {sites.map((site) => (
+                <label
+                  key={site.id}
+                  title={site.description}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-ink-850"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedSites.includes(site.id)}
+                    onChange={() => onToggleSite(site.id)}
+                    className="h-3.5 w-3.5 flex-none rounded border-zinc-300 text-brand-500 focus:ring-brand-500 dark:border-ink-600 dark:bg-ink-850"
+                  />
+                  <span className="min-w-0 truncate">{site.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* --- conversation list: only when expanded --- */}

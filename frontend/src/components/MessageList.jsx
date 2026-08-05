@@ -26,13 +26,26 @@ function RoleLabel({ children }) {
 }
 
 // Turn one retrieved chunk into a short preview line.
-// Sources are plain strings today (the retriever prefixes them with "CONTENT: ").
-// Handling objects too means this keeps working once chunks carry a url/title.
+// Handles both shapes: plain strings (messages stored before chunks carried
+// metadata) and the current {content, url, title, site, heading} records.
 function preview(raw) {
   const text =
     typeof raw === "string" ? raw : (raw?.content ?? raw?.text ?? JSON.stringify(raw));
-  const clean = String(text)
-    .replace(/^CONTENT:\s*/i, "") // drop the retriever's prefix
+
+  // The chunker prefixes every chunk with its breadcrumb ("Page > Section\n\n…")
+  // so the embedding carries its section. That breadcrumb is rendered as the
+  // link title just above, so showing it here too would repeat the same words.
+  // Only strip it when it really is one: a single line that either contains the
+  // " > " separator or exactly matches this source's title/heading. A section
+  // with no ancestors has no breadcrumb, and its first paragraph is real content.
+  const [first, ...rest] = String(text).split("\n\n");
+  const crumbs = [raw?.title, raw?.heading].filter(Boolean);
+  const isBreadcrumb =
+    rest.length > 0 && (first.includes(" > ") || crumbs.includes(first.trim()));
+  const body = isBreadcrumb ? rest.join("\n\n") : text;
+
+  const clean = String(body)
+    .replace(/^CONTENT:\s*/i, "") // legacy prefix from the old retriever
     .replace(/\s+/g, " ") // collapse newlines so previews stay 1-2 lines
     .trim();
   return clean.length > 200 ? clean.slice(0, 200).trimEnd() + "…" : clean;
@@ -62,19 +75,68 @@ function Sources({ sources }) {
 
       {open && (
         <ol className="mt-2 flex flex-col gap-2">
-          {sources.map((src, i) => (
-            <li
-              key={i}
-              className="flex gap-2.5 rounded-lg border border-zinc-200 bg-white p-3 dark:border-ink-800 dark:bg-ink-900"
-            >
-              <span className="grid h-5 w-5 flex-none place-items-center rounded-md bg-brand-500/10 text-[11px] font-semibold text-brand-500">
-                {i + 1}
-              </span>
-              <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-400">
-                {preview(src)}
-              </p>
-            </li>
-          ))}
+          {sources.map((src, i) => {
+            // Pre-Phase-3 messages stored sources as bare strings — they have no
+            // url to link to, so they render as before rather than breaking.
+            const url = typeof src === "string" ? null : src?.url;
+            const title = typeof src === "string" ? null : (src?.title || src?.source);
+            const heading = typeof src === "string" ? null : src?.heading;
+            const site = typeof src === "string" ? null : src?.site;
+
+            return (
+              <li
+                key={i}
+                className="flex gap-2.5 rounded-lg border border-zinc-200 bg-white p-3 dark:border-ink-800 dark:bg-ink-900"
+              >
+                <span className="grid h-5 w-5 flex-none place-items-center rounded-md bg-brand-500/10 text-[11px] font-semibold text-brand-500">
+                  {i + 1}
+                </span>
+
+                <div className="min-w-0 flex-1">
+                  {title && (
+                    <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      {url ? (
+                        // rel="noopener noreferrer" is not optional on target="_blank":
+                        // without it the opened page gets a window.opener handle back
+                        // into this one.
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="truncate text-[13px] font-medium text-brand-500 hover:underline"
+                        >
+                          {title}
+                        </a>
+                      ) : (
+                        <span className="truncate text-[13px] font-medium text-zinc-700 dark:text-zinc-300">
+                          {title}
+                        </span>
+                      )}
+
+                      {site && (
+                        <span className="flex-none rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-ink-800 dark:text-zinc-400">
+                          {site}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* The section within the page. Skipped when it just repeats the
+                      title — true for a page's opening chunk, where the section
+                      heading IS the page title. */}
+                  {heading && heading !== title && (
+                    <div className="mb-1 truncate text-[12px] text-zinc-400 dark:text-zinc-500">
+                      {heading}
+                    </div>
+                  )}
+
+                  <p className="text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+                    {preview(src)}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>

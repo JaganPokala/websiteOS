@@ -122,6 +122,9 @@ export function deleteConversation(conversationId) {
   return request(`/conversations/${conversationId}`, { method: "DELETE" });
 }
 
+export function listSites() {
+  return request("/sites");
+}
 // --- chat (streaming) --------------------------------------------------------
 // Not using the browser's EventSource API: that's GET-only, and /query/stream is a
 // POST with a body. So we read the SSE stream out of the fetch response ourselves.
@@ -131,7 +134,7 @@ export function deleteConversation(conversationId) {
 // word-by-word; onStatus reports which pipeline stage the backend is on.
 // Named options (not positional args) so new event types don't churn the signature.
 
-export async function streamQuery(conversationId, q, { onToken, onStatus, onSources } = {}) {
+export async function streamQuery(conversationId, q, { sites, onToken, onStatus, onSources } = {}) {
   const token = getToken();
 
   const res = await fetch(`${BASE_URL}/query/stream`, {
@@ -140,7 +143,7 @@ export async function streamQuery(conversationId, q, { onToken, onStatus, onSour
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ q, conversation_id: conversationId }),
+    body: JSON.stringify({ q, conversation_id: conversationId, sites: sites ?? [] }),
   });
 
   if (res.status === 401) {

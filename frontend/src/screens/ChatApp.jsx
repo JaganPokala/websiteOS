@@ -19,6 +19,7 @@ const MIN_SIDEBAR_WIDTH = 220;
 const MAX_SIDEBAR_WIDTH = 420;
 const DEFAULT_SIDEBAR_WIDTH = 272;
 const SIDEBAR_WIDTH_KEY = "sidebar_width";
+const SELECTED_SITES_KEY = "selected_sites";
 
 // Container component: owns all the state and the API calls, then hands data +
 // callbacks down to the presentational children (Sidebar, MessageList, ChatInput).
@@ -40,6 +41,23 @@ export default function ChatApp({ user, onLogout, theme, onToggleTheme }) {
   const [sendingIds, setSendingIds] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(false); // desktop: rail vs full sidebar
   const [error, setError] = useState("");
+  
+  // Two different things, deliberately not merged: `sites` is what EXISTS
+  // (fetched from the backend), `selectedSites` is what the user picked.
+  // An array, not a Set — it has to survive JSON.stringify for localStorage and
+  // go straight into the request body; a Set serialises to {}.
+  const [sites, setSites] = useState([]);
+  const [selectedSites, setSelectedSites] = useState(() => {
+    // A hand-edited or half-written value must not crash the app before any
+    // UI renders — anything unexpected falls back to "no filter".
+    try {
+      const saved = JSON.parse(localStorage.getItem(SELECTED_SITES_KEY));
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  
 
   // Desktop sidebar width, drag-adjustable. Lazy initialiser reads any saved
   // width once on mount instead of flashing the default then jumping to it.
@@ -80,11 +98,41 @@ export default function ChatApp({ user, onLogout, theme, onToggleTheme }) {
     else setCollapsed((c) => !c);
   }
 
+  function handleToggleSite(siteId) {
+    setSelectedSites((current) =>
+      current.includes(siteId) ? current.filter((id) => id !== siteId) : [...current, siteId]
+    );
+  }
+
   // Persist the chosen width so a reload remembers it, same idea as the JWT
   // living in localStorage — it's a UI preference, not conversation data.
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
+
+
+    // Fetch the catalogue once. On failure the picker simply doesn't render and
+  // chat keeps working unfiltered — which is already the "nothing selected =
+  // all sites" default, so there is nothing to block on.
+  useEffect(() => {
+    api
+      .listSites()
+      .then((data) => {
+        const available = data.sites || [];
+        setSites(available);
+        // Drop selections that no longer exist. A site id saved before a rename
+        // or a re-ingest would stay in localStorage forever: the UI shows it
+        // unselected, every query silently filters on a dead id, and the result
+        // is zero sources — indistinguishable from "nothing relevant found".
+        const ids = new Set(available.map((s) => s.id));
+        setSelectedSites((current) => current.filter((id) => ids.has(id)));
+      })
+      .catch(() => setSites([]));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SELECTED_SITES_KEY, JSON.stringify(selectedSites));
+  }, [selectedSites]);
 
   // The handle only calls this on mousedown; the actual tracking happens in
   // the effect below, which attaches window-level listeners for the duration
@@ -291,6 +339,7 @@ export default function ChatApp({ user, onLogout, theme, onToggleTheme }) {
       let collectedSources = [];
 
       await api.streamQuery(convId, text, {
+        sites: selectedSites,
         onToken: (token) => {
           full += token;
           // Guarded: if the user has switched to a different chat, this token
@@ -476,6 +525,9 @@ export default function ChatApp({ user, onLogout, theme, onToggleTheme }) {
           onToggleTheme={onToggleTheme}
           user={user}
           onLogout={onLogout}
+          sites={sites}
+          selectedSites={selectedSites}
+          onToggleSite={handleToggleSite}
         />
       </div>
 
